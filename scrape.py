@@ -2,13 +2,10 @@ from bs4 import BeautifulSoup
 import requests
 import time
 import os
-import subprocess
-import shlex
 import urlparse
 
 base_url = "http://www.lawsofindia.org"
-
-cookie = {"PHPSESSID": "c9fb7f2770f39540a098ea285189b456"}
+base_dir = "."
 
 headers = {
     "Host": " www.lawsofindia.org",
@@ -21,6 +18,7 @@ headers = {
     "Connection": " keep-alive",
 }
 
+
 def get_pdf_url(href):
     query = urlparse.urlparse(href).query
     return "{}/pdf/{}".format(base_url, urlparse.parse_qs(query)['file'][0])
@@ -31,16 +29,28 @@ def get_pdf_list(state, url):
     soup = BeautifulSoup(html, 'html.parser')
     pdfs = [get_pdf_url(base_url + x['href']) for x in soup.find_all('a') if '.pdf' in x['href']]
 
-    with open("{}.txt".format(state), 'w') as fp:
-        fp.write("\n".join(pdfs))
+    return pdfs
 
 
-def download_pdfs(state, headers):
-    infile = "{}.txt".format(state)
-    dir = state.lower().replace(" ", "_")
+def download_pdfs(pdfs, state, headers):
+    dir_name = state.lower().replace(" ", "_")
+    dir_path = "{}/{}".format(base_dir, dir_name)
 
-    cmd = "aria2c -i {} -d {}".format(infile, dir)
-    subprocess.call(shlex.split(cmd))
+    if not os.path.isdir(dir_path):
+        os.makedirs(dir_path)
+
+    for pdf in pdfs:
+        fname = "{}/{}".format(dir_path, pdf.split('/')[-1])
+        if os.path.exists(fname):
+            print("{} already downloaded".format(fname))
+            continue
+
+        r = requests.get(pdf, headers=headers)
+
+        with open(fname, 'wb') as fp:
+            print("writing {}".format(fname))
+            fp.write(r.content)
+
 
 html = requests.get(base_url).text
 soup = BeautifulSoup(html, 'html.parser')
@@ -53,13 +63,7 @@ for state, url in state_pages[::-1]:
     time.sleep(1)  # Sleep for 1 sec so that you appear human
     state_soup = BeautifulSoup(requests.get(url).text, 'html.parser')
     alpha = [x['href'] for x in state_soup.find_all('a') if 'alpha/' in x['href']][0]
-    get_pdf_list(state, base_url + alpha)
+    pdfs = get_pdf_list(state, base_url + alpha)
 
     headers['Referer'] = url
-    download_pdfs(state, headers)
-
-
-
-
-
-# TODO: setup python auto completion
+    download_pdfs(pdfs, state, headers)
