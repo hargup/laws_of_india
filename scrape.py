@@ -1,8 +1,10 @@
+# Use Python3 to run this file
 from bs4 import BeautifulSoup
 import requests
 import time
 import os
-import urlparse
+import urllib.parse as urlparse
+import csv
 
 base_url = "http://www.lawsofindia.org"
 base_dir = "."
@@ -24,16 +26,28 @@ def get_pdf_url(href):
     return "{}/pdf/{}".format(base_url, urlparse.parse_qs(query)['file'][0])
 
 
-def get_pdf_list(state, url):
+def get_pdf_list(url):
+    # html in the url should be similar this one
+    # http://www.lawsofindia.org/single/alpha/29.html
+
     html = requests.get(url).text
     soup = BeautifulSoup(html, 'html.parser')
-    pdfs = [get_pdf_url(base_url + x['href']) for x in soup.find_all('a') if '.pdf' in x['href']]
+    pdfs = []
+    titles = []
+    for li in soup.find_all('li'):
+        if not 'pdf' in str(li):
+            continue
+        name_a, *_, pdf_a = list(li.children)
+        title = name_a.text
+        titles.append(title)
+        pdf = get_pdf_url(base_url + pdf_a['href'])
+        pdfs.append(pdf)
 
-    return pdfs
+    return pdfs, titles
 
 
 def download_pdfs(pdfs, state, headers):
-    dir_name = state.lower().replace(" ", "_")
+    dir_name = state
     dir_path = "{}/{}".format(base_dir, dir_name)
 
     if not os.path.isdir(dir_path):
@@ -59,11 +73,21 @@ state_pages = [(x.string, x['href']) for x in soup.find_all('a') if 'state/' in 
 
 states = [x[0] for x in state_pages]
 
-for state, url in state_pages[::-1]:
+rows = ["indentifier,file,title"]
+for state, url in state_pages:
+
+    state = state.lower().replace(" ", "_")
     time.sleep(1)  # Sleep for 1 sec so that you appear human
     state_soup = BeautifulSoup(requests.get(url).text, 'html.parser')
     alpha = [x['href'] for x in state_soup.find_all('a') if 'alpha/' in x['href']][0]
-    pdfs = get_pdf_list(state, base_url + alpha)
+    pdf_urls, titles = get_pdf_list(base_url + alpha)
 
+    rows.extend([",{}/{},\"{}\"".format(state,pdf.split('/')[-1],title) for pdf,
+        title in zip(pdf_urls, titles)])
     headers['Referer'] = url
-    download_pdfs(pdfs, state, headers)
+
+    # Uncomment the following line to download the files
+    # download_pdfs(pdfs, state, headers)
+
+with open('metadata.csv', 'w') as csv_writer:
+    csv_writer.write("\n".join(rows))
